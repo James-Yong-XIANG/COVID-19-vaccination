@@ -1,0 +1,1045 @@
+
+
+
+####### import packages ###### 
+
+source("/exeh_4/xyong/project/R_361_lib.R")
+system("ls")
+library(venn)
+rm(list=ls())
+
+
+
+# death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-3/COVID-19-vaccine-effects-HF-RF-updated-primary-newonset-hx-death_exc_updated-3-Aug.csv.gz")
+
+ death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Aug-30.csv.gz")
+
+# death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Sep-9.csv.gz")
+
+
+
+# setnames(death_tmp, c("Any_first_dose", "start.day.vaccine.se"), c("Any_first_shot", "index_date"))
+setnames(death_tmp, c("Any_first_dose", "HB"), c("Any_first_shot", "Hb"))
+## try the pre-defined subjects ### 
+death_tmp <- death_tmp[death_tmp$source != "" & death_tmp$exculded_due_to_death == "keep",] %>% mutate(
+    vaccination = case_when(
+        is.na(Any_first_shot) ~ 0,
+        # !is.na(Any_first_shot) & start.day.vaccine.se > ymd("2021/03/31") ~ 0,
+        # !is.na(Any_first_shot) & start.day.vaccine.se <= ymd("2021/03/31") ~ 1
+        !is.na(Any_first_shot) & Any_first_shot >= ymd("2021/03/31") ~ 0,
+        !is.na(Any_first_shot) & Any_first_shot < ymd("2021/03/31") ~ 1
+    )
+)
+table(death_tmp$vaccination) 
+head(death_tmp, 1)
+# table(is.na(death_tmp$Any_first_shot))
+# summary(death_tmp$start.day.BI)
+summary(death_tmp$start.day.vaccine.se)
+
+
+# ###### PTDM dataset format ####### 
+# # 1. get the vaccination date vector 
+# table(death_tmp$vaccination)
+# vaccination_date <- unique(death_tmp[vaccination==1,]$index_date)
+# unvaccination_date <- sample(vaccination_date, size=nrow(death_tmp[vaccination==0,]), replace=TRUE)
+# # 2. update the index date by random sample
+# death_tmp <- death_tmp %>% mutate(
+#     index_date_PTDM = case_when(
+#         vaccination==1 ~ ymd(index_date),
+#         vaccination==0 ~ ymd(sample(vaccination_date, size=1, replace=TRUE))
+#     )
+# )
+# death_tmp$index_date <- death_tmp$index_date_PTDM
+# # 3. rm the event before the index_date for each subjects 
+# head(death_tmp, 1)
+# setnames(death_tmp, c("Any_first_shot", "Hb"), c("Any_first_dose", "HB"))
+# cat(names(death_tmp), sep="\",\"")
+# death_tmp <- death_tmp[,-c("vaccination","index_date_PTDM")]
+# fwrite(death_tmp, "/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Sep-9.csv.gz")
+# ##### PTDM dataset format ####### 
+
+#### import the covid cohort info #### 
+covid_cohort <- fread("/exeh_4/xyong/project/UKBB/Jun-30/covid-cohort/COVID-19-Cohort-info-Aug-27.csv.gz")
+covid_tmp <- merge(death_tmp, covid_cohort, by="eid", all.x=TRUE)
+
+head(covid_tmp[4,])
+covid_tmp <- covid_tmp %>% mutate(
+    index_date_cox = case_when(
+        is.na(cohort_cat) ~ ymd("2021/08/18"),
+        !is.na(cohort_cat) ~ ymd(index_date_cox),
+    ) ,
+    index_date_time = case_when(
+        is.na(cohort_cat) ~ ymd("2021/08/18"),
+        !is.na(cohort_cat) ~ ymd(index_date_time),
+    ) ,
+    cohort_cat = case_when(
+        is.na(cohort_cat) ~ "untested",
+        !is.na(cohort_cat) ~ cohort_cat,
+    )     
+)
+# table(covid_tmp$cohort_cat)
+death_tmp <- covid_tmp %>% mutate(
+    prior_infection = case_when(
+        cohort_cat != "untested" & cohort_cat != "ve-neg" & index_date_cox < index_date ~ "Y",
+        cohort_cat != "untested" & cohort_cat != "ve-neg" & index_date_cox >= index_date ~ "N",
+        cohort_cat == "untested" | cohort_cat == "ve-neg" ~ "N"
+    )
+) %>% mutate_at("prior_infection", as.factor)
+
+
+dim(death_tmp)
+table(death_tmp$exculded_due_to_death)
+table(death_tmp$prior_infection) 
+table(death_tmp$prior_infection) %>% sum 
+
+summary(covid_cohort$index_date_cox)
+summary(death_tmp$date_of_death)
+
+
+
+
+
+cols <- c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","Heart_Failure_hx", "Renal_Failure_hx", "CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new", "Heart_Failure_new", "Renal_Failure_new" ,"CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","Heart_Failure_relapse", "Renal_Failure_relapse", "dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine", "Heart_Failure_hos_after_vaccine","Renal_Failure_hos_after_vaccine")
+
+#cols <- c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","Heart_Failure_hx", "Renal_Failure_hx", "CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new", "CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine")
+library(magrittr)
+death_tmp %<>%  mutate_at(cols, funs(ymd))
+str(death_tmp[,1:30])
+
+# reformate the history of comorbidity ### 
+# define the function of replace the NA to 0 ## 
+replace_NA <- function(x){
+    x <- ifelse(is.na(x), 0, 1)
+    x
+}
+## apply to the death_tmp ## 
+death_tmp <- death_tmp %>%  mutate_at(.vars=c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx", "Heart_Failure_hx", "Renal_Failure_hx"), funs(replace_NA))
+
+# the cohort of effect have NA 
+for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "Heart_Failure_hx", "Renal_Failure_hx", "prior_infection")) {
+    death_tmp[[i]] <- as.factor(death_tmp[[i]])
+}
+
+for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+    death_tmp[[i]] <- as.numeric(death_tmp[[i]])
+}
+str(death_tmp)
+
+head(death_tmp, 1)
+
+
+##### creat different cohort #### 
+new_onset <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_new")),date_of_death:ethnic_c) 
+relapse <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_relapse")),date_of_death:ethnic_c) 
+hos_after_vaccine <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_hos_after_vaccine")),date_of_death:ethnic_c) 
+names(hos_after_vaccine)
+str(hos_after_vaccine)
+# summary(comorbidity$diagnoses_date)
+        # Min.      1st Qu.       Median         Mean      3rd Qu.         Max. 
+# "1938-05-01" "2005-06-07" "2011-02-26" "2009-08-02" "2016-04-08" "2021-04-07" 
+
+# vaccine_se <- list(new_onset= new_onset, relapse=relapse, hos_after_vaccine=hos_after_vaccine)
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Diease-newonset-hx-updated-12-Jul.RData")
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Diease-newonset-hx-updated-18-Jul.RData")
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Disease-newonset-hx-updated-23-Jul.RData")
+
+
+    # sw <- c("vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx")
+    # cat(str_split(sw, " ")[[1]] %>% unique, sep ="\", \"")
+
+uni_list <- c("ethnic_c", "no.non_cancer_illness", "townsend", "bmi", "waist_circum", "smoking_status", "hx_cancer", "Glucose", "HDL", "LDL", "HbA1c", "Trig", "Hb", "Immunosuppressants", "CAD_hx", "COPD_hx", "HTN_hx", "Immunod_hx", "non_covid_pneumonia_hx", "organ_specific_autoimmune_hx", "Stroke_hx", "systemic_autoimmune_hx", "T2DM_hx", "CKD_hx", "AF_hx", "dementia_hx")
+
+
+uni_cox <- function(z){
+    mode <- coxph(Surv(time, event==1) ~  test[[z]] , data= test )
+    df <-  summary(mode)$coefficients %>% as.data.frame()
+    df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                    ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    df$cov <- z
+    df <- cbind(df, exp(confint(mode)), Cox_Warning = "N")
+    df
+}
+
+##### try the cox on the newonset analysis #### 
+head(new_onset,3)
+# test on the CAD_new first ##### 
+# cat(names(new_onset), sep ="\",\"")
+res_new_onset <- NULL 
+uni_new_onset <- NULL
+# for newonset may only carried out witihin CAD AF Stroke VTE organ_specific_autoimmune
+# uni_cox("Immunod_new")
+
+for (w in c("CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new","Heart_Failure_new", "Renal_Failure_new" )){    
+    # test <- new_onset %>% mutate(target = i) 
+    test <- new_onset
+    test$target <- test[[w]]
+    
+    # test$target <- test[["Stroke_new"]]
+    # test$target <- test[["Heart_Failure_new"]]
+    # test$target <- test[["Immunod_new"]]
+
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    test <- test[test$time>0,]
+    ## get the person year cal
+    a <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$time),
+                no.of_Persons = sum(as.numeric(x$event)),
+                Incidence_Rate = sum(as.numeric(x$event))/sum(x$time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- a[["1"]]$no.of_Person_Days;
+        b1 <- a[["1"]]$no.of_Persons;
+        a2 <- a[["0"]]$no.of_Person_Days;
+        b2 <- a[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # get the univarates test results
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_cox(x);df
+                },warning = function(w){
+                    df <- uni_cox(x)
+                    df$Cox_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_new_onset[[w]] <- uni_res
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Cox_Warning == "N") %>% dplyr::select(cov) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )"), paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med ", ", data= test )"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- tryCatch({    
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "N", dat); df
+
+    },warning = function(w){
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "Y", dat); df
+
+    },error = function(e){
+        print("error")
+        3
+    })
+    res_new_onset[[w]] <- cbind(Outcome=w, df)
+
+    rm(df, poi, dat, test, uni_sig_cov) 
+    print(w)
+}
+
+res_new_onset
+# save(res_new_onset, file= "/exeh_4/xyong/project/Vaccine-seq/Data/Aug-3/test.RData")
+# load("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-3/test.RData")
+
+
+
+# rm(res_new_onset)
+names(res_new_onset)
+lapply(res_new_onset, names)
+# res_new_onset[["organ_specific_autoimmune_new",] %>% head 
+
+lapply(res_new_onset[11:15], function(x){
+    df <- as.data.frame(x)[1, ]
+    df <- dplyr::filter(df, Sig != "")
+    df
+})
+
+## get the results of the relapse ##### 
+head(relapse,3)
+# test on the CAD_new first ##### 
+cat(names(relapse), sep="\",\"")
+# reformate the history of comorbidity ### 
+# relapse <- relapse %>%  mutate_at(.vars=c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx"), funs(replace_NA))
+
+res_relapse <- NULL 
+uni_relapse <- NULL
+for (w in c("CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "Heart_Failure_relapse", "Renal_Failure_relapse")){
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- relapse
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+    test <- test[test$time>0,]
+## get the person year cal
+    a <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$time),
+                no.of_Persons = sum(as.numeric(x$event)),
+                Incidence_Rate = sum(as.numeric(x$event))/sum(x$time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- a[["1"]]$no.of_Person_Days;
+        b1 <- a[["1"]]$no.of_Persons;
+        a2 <- a[["0"]]$no.of_Person_Days;
+        b2 <- a[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # get the univarates test results
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_cox(x);df
+                },warning = function(w){
+                    df <- uni_cox(x)
+                    df$Cox_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_relapse[[w]] <- uni_res
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Cox_Warning == "N") %>% dplyr::select(cov) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )"), paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med ", ", data= test )"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- tryCatch({    
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "N", dat); df
+
+    },warning = function(w){
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "Y", dat); df
+
+    },error = function(e){
+        print("error")
+        3
+    })
+    res_relapse[[w]] <- cbind(Outcome=w, df)
+
+    rm(df, poi, dat, test, uni_sig_cov) 
+    print(w)
+}
+lapply(res_relapse, dim)
+
+lapply(res_relapse[6:10], function(x){
+    df <- as.data.frame(x)[1,]
+    df <- dplyr::filter(df, Sig != "")
+    df
+})
+
+##### get the results of the new-hospitalization ##### 
+head(hos_after_vaccine,3)
+# cat(names(hos_after_vaccine), sep="\", \"")
+# hos_after_vaccine <- hos_after_vaccine %>%  mutate_at(.vars=c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx"), funs(replace_NA))
+# table(is.na(hos_after_vaccine$organ_specific_autoimmune_hx))
+res_hos_after_vaccine <- NULL 
+uni_hos_after_vaccine <- NULL 
+for (w in c("CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine", "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine", "Heart_Failure_hos_after_vaccine", "Renal_Failure_hos_after_vaccine")){
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+    test <- test[test$time>0,]
+## get the person year cal
+    a <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$time),
+                no.of_Persons = sum(as.numeric(x$event)),
+                Incidence_Rate = sum(as.numeric(x$event))/sum(x$time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- a[["1"]]$no.of_Person_Days;
+        b1 <- a[["1"]]$no.of_Persons;
+        a2 <- a[["0"]]$no.of_Person_Days;
+        b2 <- a[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # get the univarates test results
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_cox(x);df
+                },warning = function(w){
+                    df <- uni_cox(x)
+                    df$Cox_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_hos_after_vaccine[[w]] <- uni_res
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Cox_Warning == "N") %>% dplyr::select(cov) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )"), paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med ", ", data= test )"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- tryCatch({    
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "N", dat); df
+
+    },warning = function(w){
+        mode <- eval(C)
+        df <-  summary(mode)$coefficients %>% as.data.frame() 
+        df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                        ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                            ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+        df <- cbind(df, exp(confint(mode)), Cox_Warning = "Y", dat); df
+
+    },error = function(e){
+        print("error")
+        3
+    })
+    res_hos_after_vaccine[[w]] <- cbind(Outcome=w, df)
+
+    rm(df, poi, dat, test, uni_sig_cov) 
+    print(w)
+}
+lapply(res_hos_after_vaccine, dim)
+names(res_hos_after_vaccine)
+
+
+head(res_hos_after_vaccine[["CKD_hos_after_vaccine"]], 10)
+
+lapply(res_hos_after_vaccine[c(11:15)], function(x){
+    df <- as.data.frame(x)[1,]
+    df <- dplyr::filter(df, Sig != "")
+    df
+})
+# save(res_new_onset, res_relapse, res_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Jul-18/Vaccine-SE-res-newonset-relapse-hospitalizaiton-18-Jul.RData")
+# save(res_new_onset, res_relapse, res_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Jul-18/Vaccine-SE-res-primary-diag-newonset-relapse-hospitalizaiton-23-Jul.RData")
+
+
+
+##### try to get the poisson res 
+uni_poi <- function(y){
+    df <- data.frame(test)
+    df$outcome <- as.numeric(df$outcome)        # df$cohort_effect <- as.numeric(df$cohort_effect) %>% as.factor
+    df[df$FU_time == 0, "FU_time"] <- 0.5
+
+    # mode <- coxph(Surv(time, event==1) ~  test[[z]] , data= test )
+    fit <- glm(outcome ~ df[[y]], data=df, offset= log(FU_time), family=poisson)
+
+    a <- summary(fit)$coefficients %>% as.data.frame
+    a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+    # a <- cbind(a, exp(confint(fit)));a
+    model_degree_freedom <- df.residual(fit)
+    a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            # mutate(term = rownames(.))  %>%
+            mutate(term = y)  %>%
+    mutate(statistic = estimate / std.error ,
+        INR = exp(estimate),
+        conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+        conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+    a <- cbind(a, Poi_Warning = "N", dat);a[2,]
+}
+
+# uni_poi("Stroke_new")
+
+# cat(names(new_onset), sep ="\",\"")
+poisson_new_onset <- NULL 
+uni_poi_new_onset <- NULL
+# for newonset may only carried out witihin CAD AF Stroke VTE organ_specific_autoimmune
+
+
+for (w in c("CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new", "Heart_Failure_new", "Renal_Failure_new")){    
+
+    # test <- new_onset %>% mutate(target = i) 
+    test <- new_onset
+    test$target <- test[[w]]
+
+    # test$target <- test[["CKD_new"]]
+    
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    outcome = ifelse(!is.na(target), 1, 0),
+    FU_time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+    test <- test[test$FU_time>0,]
+ 
+    apy <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$FU_time),
+                no.of_Persons = sum(as.numeric(x$outcome)),
+                Incidence_Rate = sum(as.numeric(x$outcome))/sum(x$FU_time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- apy[["1"]]$no.of_Person_Days;
+        b1 <- apy[["1"]]$no.of_Persons;
+        a2 <- apy[["0"]]$no.of_Person_Days;
+        b2 <- apy[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_poi(x);df
+                },warning = function(w){
+                    df <- uni_poi(x)
+                    df$Poi_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_poi_new_onset[[w]] <- uni_res
+    # head(uni_res)
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Poi_Warning == "N") %>% dplyr::select(term) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data=df, offset= log(FU_time), family=poisson)"), paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med ", ", data=df, offset= log(FU_time), family=poisson)"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- data.frame(test)
+    df$outcome <- as.numeric(df$outcome)        # df$cohort_effect <- as.numeric(df$cohort_effect) %>% as.factor
+    df[df$FU_time == 0, "FU_time"] <- 0.5
+
+    df_poi <- tryCatch({    
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "N", dat);a
+    },warning = function(w){
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "Y", dat);a
+    },error = function(e){
+        print("error")
+        3
+    })
+    poisson_new_onset[[w]] <- cbind(Outcome=w, df_poi)
+    rm(df, poi, df_poi, dat, test) 
+	print(w)
+}
+
+
+names(poisson_new_onset)
+lapply(poisson_new_onset, names)
+
+lapply(poisson_new_onset[6:11], function(x){
+    df <- as.data.frame(x)[2,]
+    df <- dplyr::filter(df, Sig != "")
+    df
+})
+
+#### try to get the res-relapse ## 
+
+# cat(names(new_onset), sep ="\",\"")
+poisson_relapse <- NULL 
+uni_poi_relapse <- NULL 
+# for newonset may only carried out witihin CAD AF Stroke VTE organ_specific_autoimmune
+
+
+for (w in c("CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "Heart_Failure_relapse", "Renal_Failure_relapse")){    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- relapse
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    outcome = ifelse(!is.na(target), 1, 0),
+    FU_time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+    test <- test[test$FU_time>0,]
+ 
+    apy <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$FU_time),
+                no.of_Persons = sum(as.numeric(x$outcome)),
+                Incidence_Rate = sum(as.numeric(x$outcome))/sum(x$FU_time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- apy[["1"]]$no.of_Person_Days;
+        b1 <- apy[["1"]]$no.of_Persons;
+        a2 <- apy[["0"]]$no.of_Person_Days;
+        b2 <- apy[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_poi(x);df
+                },warning = function(w){
+                    df <- uni_poi(x)
+                    df$Poi_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_poi_relapse[[w]] <- uni_res
+    # head(uni_res)
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Poi_Warning == "N") %>% dplyr::select(term) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data=df, offset= log(FU_time), family=poisson)"), paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med ", ", data=df, offset= log(FU_time), family=poisson)"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- data.frame(test)
+    df$outcome <- as.numeric(df$outcome)        # df$cohort_effect <- as.numeric(df$cohort_effect) %>% as.factor
+    df[df$FU_time == 0, "FU_time"] <- 0.5
+
+    df_poi <- tryCatch({    
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "N", dat);a
+    },warning = function(w){
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "Y", dat);a
+    },error = function(e){
+        print("error")
+        3
+    })
+    poisson_relapse[[w]] <- cbind(Outcome=w, df_poi)
+    rm(df, poi, df_poi, dat, test) 
+	print(w)
+}
+
+
+names(poisson_relapse)
+lapply(poisson_relapse, names)
+
+lapply(poisson_relapse, function(x){
+    df <- as.data.frame(x)
+    df <- dplyr::filter(df, Sig != "")
+    df
+})
+
+
+
+#### try to get the res-hos_after_vaccine ## 
+
+# cat(names(new_onset), sep ="\",\"")
+poisson_hos_after_vaccine <- NULL 
+uni_poi_hos_after_vaccine <- NULL
+# for newonset may only carried out witihin CAD AF Stroke VTE organ_specific_autoimmune
+
+
+for (w in c("CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine", "Heart_Failure_hos_after_vaccine", "Renal_Failure_hos_after_vaccine")){    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+    test$target <- test[[w]]
+
+    # test$target <- test[["CAD_hos_after_vaccine"]]
+
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    outcome = ifelse(!is.na(target), 1, 0),
+    FU_time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+    test <- test[test$FU_time>0,]
+ 
+    apy <- by(test, test$vaccination, 
+            function(x){data.frame(no.of_Person_Days = sum(x$FU_time),
+                no.of_Persons = sum(as.numeric(x$outcome)),
+                Incidence_Rate = sum(as.numeric(x$outcome))/sum(x$FU_time) * 1000)})
+
+        
+        # colnames(df) = c("no.of_Person_Days","no.of_Persons","no.of_Person_Days","no.of_Persons",'cohort','disease')
+        # colnames(df)=c('a1','b1','a2','b2','cohort','disease')
+        a1 <- apy[["1"]]$no.of_Person_Days;
+        b1 <- apy[["1"]]$no.of_Persons;
+        a2 <- apy[["0"]]$no.of_Person_Days;
+        b2 <- apy[["0"]]$no.of_Persons
+        # poi = poisson.exact(c(b2,b1),c(a2,a1))
+    poi = poisson.exact(c(b1,b2),c(a1,a2))
+
+    dat <- data.frame(
+            no.of_Persons.unvac = b2, 
+            no.of_Person_Days.unvac = a2, 
+            no.of_Persons.vac = b1, 
+            no.of_Person_Days.vac = a1, 
+            INR_pyrs = poi$estimate, 
+            pval_pyrs = poi$p.value, 
+            lower.CI_pyrs = poi$conf.int[1], 
+            upper.CI_pyrs = poi$conf.int[2]
+        )       
+
+    uni_res <- lapply(uni_list, function(x){
+            tryCatch({    
+                    df <- uni_poi(x);df
+                },warning = function(w){
+                    df <- uni_poi(x)
+                    df$Poi_Warning = "Y"
+                    df
+                },error = function(e){
+                    print("error")
+                    3
+                })
+        }) %>% rbindlist 
+    uni_poi_hos_after_vaccine[[w]] <- uni_res
+    # head(uni_res)
+        # uni_res <- lapply(uni_list, uni_cox) %>% rbindlist 
+        # get the covariates with nominal sig covariates 
+    uni_sig_cov <- uni_res %>% dplyr::filter(Sig != "" & Poi_Warning == "N") %>% dplyr::select(term) %>% as.matrix %>% t() %>% as.vector()
+    # creat the string
+    B <- ifelse(length(uni_sig_cov) > 0, paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data=df, offset= log(FU_time), family=poisson)"), paste0("glm(outcome ~ vaccination + prior_infection + age_char  + sex + no.hos + no.gp_med ", ", data=df, offset= log(FU_time), family=poisson)"))
+    # B <- paste0("coxph(Surv(time, event==1) ~  vaccination + prior_infection + age_char + sex + no.hos + no.gp_med + ", paste(uni_sig_cov, collapse = " + "), ", data= test )")
+    # creat the expression
+    C = parse(text = B)
+    # solution of the expression
+    df <- data.frame(test)
+    df$outcome <- as.numeric(df$outcome)        # df$cohort_effect <- as.numeric(df$cohort_effect) %>% as.factor
+    df[df$FU_time == 0, "FU_time"] <- 0.5
+
+    df_poi <- tryCatch({    
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "N", dat);a
+    },warning = function(w){
+        fit <- eval(C)
+        a <- summary(fit)$coefficients %>% as.data.frame
+        a$Sig <-  ifelse(a[,4] < 0.001, "***", 
+                    ifelse(a[,4] < 0.01 & a[,4] >= 0.001, "**",
+                        ifelse(a[,4] < 0.05 & a[,4] >= 0.01, "*", "")));a
+        # a <- cbind(a, exp(confint(fit)));a
+        model_degree_freedom <- df.residual(fit)
+        a %<>%  magrittr::set_colnames(c("estimate", "std.error", "z", "p_value", "Sig")) %>%
+            mutate(term = rownames(.))  %>%
+        mutate(statistic = estimate / std.error ,
+                    INR = exp(estimate),
+                    conf.low = exp(estimate + std.error * qt(0.025, model_degree_freedom)),
+                    conf.high = exp(estimate + std.error * qt(0.975, model_degree_freedom))) 
+        a <- cbind(a, Poi_Warning = "Y", dat);a
+    },error = function(e){
+        print("error")
+        3
+    })
+    poisson_hos_after_vaccine[[w]] <- cbind(Outcome=w, df_poi)
+    rm(df, poi, df_poi, dat, test) 
+	print(w)
+
+}
+
+
+names(poisson_hos_after_vaccine)
+lapply(poisson_hos_after_vaccine, names)
+
+lapply(poisson_hos_after_vaccine, function(x){
+    df <- as.data.frame(x)[2,]
+    df <- dplyr::filter(df, Sig != "")
+    df
+}) %>% rbindlist
+
+# save(res_new_onset, res_relapse, res_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Aug-30/Vaccine-SE-prior-infection-Aug-30-test.RData")
+#save(res_new_onset, res_relapse, res_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Aug-30/Vaccine-SE-prior-infection-Aug-30-test-Ver-1.2.RData")
+
+
+# save(res_new_onset, res_relapse, res_hos_after_vaccine, poisson_new_onset, poisson_relapse, poisson_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Aug-30/with-no.hos/Vaccine-SE-with-no-hos-with-prior-infection-Aug-30.RData")
+
+save(res_new_onset, res_relapse, res_hos_after_vaccine, poisson_new_onset, poisson_relapse, poisson_hos_after_vaccine, uni_poi_new_onset, uni_poi_relapse, uni_poi_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Sep-9/cov_selection/No-PTDM-Vaccine-SE-with-no-hos-with-prior-infection-Sep-12.RData")
+
+
+# Overall change
+#  & death_tmp$exculded_due_to_death == "keep"
+        # cohort_cat != "untested" & cohort_cat != "ve-neg" & index_date_cox >= index_date ~ "N",
+
+
+# dim(death_tmp)
+# table(death_tmp$exculded_due_to_death)
+# table(death_tmp$prior_infection) 
+# table(death_tmp$prior_infection) %>% sum 
+
+# summary(covid_cohort$index_date_cox)
+# summary(death_tmp$date_of_death)
+
+
+# date_of_death:ethnic_c
+
+        # is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        # is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+
+
+# # 1. cp with prior infection adj to without prior infection
+# grep "HR" *R
+# sed -i 's/HR/INR/g' *R
+# # without prior_infection adjustment rewrite ##### 
+# sed -i "s/prior_infection + //g" Vaccine-SE-without-prior-infection-adjustment.R
+# sed -i "s/with-prior-infection/without-prior-infection/g" Vaccine-SE-without-prior-infection-adjustment.R
+
+
+# # 3. cp without prior infection adj to no infection all along 
+# # rewrite the no infection all along
+# ###### using vim to rewrite #######
+# # remove the subjects with infection in the cohorts ####
+# death_tmp <- death_tmp[death_tmp$cohort_cat == "untested" | death_tmp$cohort_cat == "ve-neg" , ]
+# dim(death_tmp)
+
+# sed -i "s/without-prior-infection/no-infection-all-along/g" PTDM-basic-Vaccine-SE-no-infection-all-along.R 
+
+# ## PTDM basic ## 
+
+# # remove the subjects with infection in the cohorts ####
+# death_tmp <- death_tmp[death_tmp$cohort_cat == "untested" | death_tmp$cohort_cat == "ve-neg" , ]
+# dim(death_tmp)
+
+
+# grep "prior_infection +" 
+# grep "with-prior-infection" PTDM-basic-Vaccine-SE-no-infection-all-along.R 
+
+# sed -i "s/prior_infection + //g"  PTDM-basic-Vaccine-SE-no-infection-all-along.R 
+# sed -i "s/with-prior-infection/no-infection-all-along/g" PTDM-basic-Vaccine-SE-no-infection-all-along.R 
+
+
+
+
+
+# # remove the subjects with infection in the cohorts ####
+# death_tmp <- death_tmp[death_tmp$cohort_cat == "untested" | death_tmp$cohort_cat == "ve-neg" , ]
+# dim(death_tmp)
+
+
+# grep "prior_infection +" PTDM-basic-Vaccine-effect-after-14days-no-infection-all-along-Version-2.R
+# grep "with-prior-infection" PTDM-basic-Vaccine-effect-after-14days-no-infection-all-along-Version-2.R 
+
+# sed -i "s/prior_infection + //g"  PTDM-basic-Vaccine-effect-after-14days-no-infection-all-along-Version-2.R 
+# sed -i "s/with-prior-infection/no-infection-all-along/g" PTDM-basic-Vaccine-effect-after-14days-no-infection-all-along-Version-2.R 
+
+
+
+
+# ####### rewrite the code of without-no.hos adj ## 
+# grep "PTDM-basic/with-no.hos" *
+# sed -i 's/PTDM-basic\/with-no.hos/PTDM-basic\/without-no.hos/g' *
+# grep "PTDM-basic/without-no.hos" *
+
+# grep "no.hos +" *
+# sed -i 's/no.hos +//g' *
+
+# ### get no-match results ## 
+# grep "Sep-9.RD" *
+# sed -i 's/Sep-9.RData/no-match-Sep-9.RData/g' * 
