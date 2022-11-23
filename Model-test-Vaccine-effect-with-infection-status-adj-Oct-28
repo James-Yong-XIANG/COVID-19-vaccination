@@ -1,0 +1,845 @@
+
+# get the comorbidity disease ### 
+# dead_df_tmp_single
+# load the vaccination data 
+# fwrite(vaccine, "/exeh_4/xyong/project/UKBB/May-26/raw-data/vaccine/vaccine-tpp-covid-8-Jun.csv.gz")
+##### get the imputation results with Num.tree = 1000 #### 
+source("/exeh_4/xyong/project/R_361_lib.R")
+system("ls")
+library(magrittr)
+library(venn)
+rm(list=ls())
+# filled <- fread("/exeh_4/yaning_feng/Project_Vaccine_SideEffect/James/02_Imputation/ImputationResults/NumTrees1000/filled.csv")
+# anyNA(filled)
+
+
+####### import packages ###### 
+
+source("/exeh_4/xyong/project/R_361_lib.R")
+system("ls")
+library(venn)
+rm(list=ls())
+
+
+
+# death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-3/COVID-19-vaccine-effects-HF-RF-updated-primary-newonset-hx-death_exc_updated-3-Aug.csv.gz")
+
+ death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Aug-30.csv.gz")
+
+# death_tmp <- fread("/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Sep-9.csv.gz")
+
+
+
+# setnames(death_tmp, c("Any_first_dose", "start.day.vaccine.se"), c("Any_first_shot", "index_date"))
+setnames(death_tmp, c("Any_first_dose", "HB"), c("Any_first_shot", "Hb"))
+## try the pre-defined subjects ### 
+death_tmp <- death_tmp[death_tmp$source != "" & death_tmp$exculded_due_to_death == "keep",] %>% mutate(
+    vaccination = case_when(
+        is.na(Any_first_shot) ~ 0,
+        # !is.na(Any_first_shot) & start.day.vaccine.se > ymd("2021/03/31") ~ 0,
+        # !is.na(Any_first_shot) & start.day.vaccine.se <= ymd("2021/03/31") ~ 1
+        !is.na(Any_first_shot) & Any_first_shot >= ymd("2021/03/31") ~ 0,
+        !is.na(Any_first_shot) & Any_first_shot < ymd("2021/03/31") ~ 1
+    )
+)
+table(death_tmp$vaccination) 
+head(death_tmp, 1)
+# table(is.na(death_tmp$Any_first_shot))
+# summary(death_tmp$start.day.BI)
+summary(death_tmp$start.day.vaccine.se)
+
+
+# ###### PTDM dataset format ####### 
+# # 1. get the vaccination date vector 
+# table(death_tmp$vaccination)
+# vaccination_date <- unique(death_tmp[vaccination==1,]$index_date)
+# unvaccination_date <- sample(vaccination_date, size=nrow(death_tmp[vaccination==0,]), replace=TRUE)
+# # 2. update the index date by random sample
+# death_tmp <- death_tmp %>% mutate(
+#     index_date_PTDM = case_when(
+#         vaccination==1 ~ ymd(index_date),
+#         vaccination==0 ~ ymd(sample(vaccination_date, size=1, replace=TRUE))
+#     )
+# )
+# death_tmp$index_date <- death_tmp$index_date_PTDM
+# # 3. rm the event before the index_date for each subjects 
+# head(death_tmp, 1)
+# setnames(death_tmp, c("Any_first_shot", "Hb"), c("Any_first_dose", "HB"))
+# cat(names(death_tmp), sep="\",\"")
+# death_tmp <- death_tmp[,-c("vaccination","index_date_PTDM")]
+# fwrite(death_tmp, "/exeh_4/xyong/project/Vaccine-seq/Data/Aug-30/COVID-19-vaccine-effects-history-new-hospitalization-covariates-whole-UKBB-eid-Sep-9.csv.gz")
+# ##### PTDM dataset format ####### 
+
+#### import the covid cohort info #### 
+covid_cohort <- fread("/exeh_4/xyong/project/UKBB/Jun-30/covid-cohort/COVID-19-Cohort-info-Aug-27.csv.gz")
+covid_tmp <- merge(death_tmp, covid_cohort, by="eid", all.x=TRUE)
+
+head(covid_tmp[4,])
+covid_tmp <- covid_tmp %>% mutate(
+    index_date_cox = case_when(
+        is.na(cohort_cat) ~ ymd("2021/08/18"),
+        !is.na(cohort_cat) ~ ymd(index_date_cox),
+    ) ,
+    index_date_time = case_when(
+        is.na(cohort_cat) ~ ymd("2021/08/18"),
+        !is.na(cohort_cat) ~ ymd(index_date_time),
+    ) ,
+    cohort_cat = case_when(
+        is.na(cohort_cat) ~ "untested",
+        !is.na(cohort_cat) ~ cohort_cat,
+    )     
+)
+# table(covid_tmp$cohort_cat)
+death_tmp <- covid_tmp %>% mutate(
+    prior_infection = case_when(
+        cohort_cat != "untested" & cohort_cat != "ve-neg" & index_date_cox < index_date ~ "Y",
+        cohort_cat != "untested" & cohort_cat != "ve-neg" & index_date_cox >= index_date ~ "N",
+        cohort_cat == "untested" | cohort_cat == "ve-neg" ~ "N"
+    )
+) %>% mutate_at("prior_infection", as.factor)
+
+
+dim(death_tmp)
+table(death_tmp$exculded_due_to_death)
+table(death_tmp$prior_infection) 
+table(death_tmp$prior_infection) %>% sum 
+
+summary(covid_cohort$index_date_cox)
+summary(death_tmp$date_of_death)
+
+
+
+
+
+cols <- c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","Heart_Failure_hx", "Renal_Failure_hx", "CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new", "Heart_Failure_new", "Renal_Failure_new" ,"CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","Heart_Failure_relapse", "Renal_Failure_relapse", "dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine", "Heart_Failure_hos_after_vaccine","Renal_Failure_hos_after_vaccine")
+
+#cols <- c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","Heart_Failure_hx", "Renal_Failure_hx", "CAD_new","CKD_new", "AF_new","HTN_new","COPD_new","T2DM_new","Immunod_new","Stroke_new","non_covid_pneumonia_new","VTE_new","dementia_new","systemic_autoimmune_new","organ_specific_autoimmune_new", "CAD_relapse","CKD_relapse","AF_relapse","HTN_relapse","COPD_relapse","T2DM_relapse","Immunod_relapse","Stroke_relapse","non_covid_pneumonia_relapse","VTE_relapse","dementia_relapse","systemic_autoimmune_relapse","organ_specific_autoimmune_relapse",  "CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "Immunod_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "Stroke_hos_after_vaccine", "systemic_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine", "VTE_hos_after_vaccine", "CKD_hos_after_vaccine", "AF_hos_after_vaccine", "dementia_hos_after_vaccine")
+library(magrittr)
+death_tmp %<>%  mutate_at(cols, funs(ymd))
+str(death_tmp[,1:30])
+
+# reformate the history of comorbidity ### 
+# define the function of replace the NA to 0 ## 
+replace_NA <- function(x){
+    x <- ifelse(is.na(x), 0, 1)
+    x
+}
+## apply to the death_tmp ## 
+death_tmp <- death_tmp %>%  mutate_at(.vars=c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx", "Heart_Failure_hx", "Renal_Failure_hx"), funs(replace_NA))
+
+# the cohort of effect have NA 
+for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "Heart_Failure_hx", "Renal_Failure_hx", "prior_infection")) {
+    death_tmp[[i]] <- as.factor(death_tmp[[i]])
+}
+
+for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+    death_tmp[[i]] <- as.numeric(death_tmp[[i]])
+}
+str(death_tmp)
+
+head(death_tmp, 1)
+
+
+##### creat different cohort #### 
+new_onset <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_new")),date_of_death:ethnic_c) 
+relapse <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_relapse")),date_of_death:ethnic_c) 
+hos_after_vaccine <- death_tmp %>% 
+    dplyr::select(c("eid", "Any_first_shot", "vaccination", "index_date","prior_infection", contains("_hx"), contains("_hos_after_vaccine")),date_of_death:ethnic_c) 
+names(hos_after_vaccine)
+str(hos_after_vaccine)
+# summary(comorbidity$diagnoses_date)
+        # Min.      1st Qu.       Median         Mean      3rd Qu.         Max. 
+# "1938-05-01" "2005-06-07" "2011-02-26" "2009-08-02" "2016-04-08" "2021-04-07" 
+
+# vaccine_se <- list(new_onset= new_onset, relapse=relapse, hos_after_vaccine=hos_after_vaccine)
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Diease-newonset-hx-updated-12-Jul.RData")
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Diease-newonset-hx-updated-18-Jul.RData")
+# save(vaccine_se, file="/exeh_4/xyong/project/Vaccine-seq/Data/5-Jul/COVID-19-vaccine-commorbidity-Disease-newonset-hx-updated-23-Jul.RData")
+
+
+    # sw <- c("vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx")
+    # cat(str_split(sw, " ")[[1]] %>% unique, sep ="\", \"")
+
+uni_list <- c("ethnic_c", "no.non_cancer_illness", "townsend", "bmi", "waist_circum", "smoking_status", "hx_cancer", "Glucose", "HDL", "LDL", "HbA1c", "Trig", "Hb", "Immunosuppressants", "CAD_hx", "COPD_hx", "HTN_hx", "Immunod_hx", "non_covid_pneumonia_hx", "organ_specific_autoimmune_hx", "Stroke_hx", "systemic_autoimmune_hx", "T2DM_hx", "CKD_hx", "AF_hx", "dementia_hx")
+
+
+uni_cox <- function(z){
+    mode <- coxph(Surv(time, event==1) ~  test[[z]] , data= test )
+    df <-  summary(mode)$coefficients %>% as.data.frame()
+    df$Sig <- ifelse(df[,5] < 0.001, "***", 
+                ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+                    ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    df$cov <- z
+    df <- cbind(df, exp(confint(mode)), Cox_Warning = "N")
+    df
+}
+
+
+
+##### try the cox on the newonset analysis #### 
+head(new_onset,3)
+# test on the CAD_new first ##### 
+# cat(names(new_onset), sep ="\",\"")
+res_new_onset <- NULL 
+# for newonset may only carried out witihin CAD AF Stroke VTE organ_specific_autoimmune
+
+
+for (w in c("CAD_new", "AF_new", "non_covid_pneumonia_new","Heart_Failure_new", "Renal_Failure_new", "Stroke_new", "VTE_new",
+ "HTN_new" )){    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+
+    test <- new_onset
+    test$target <- test[[w]]
+    
+    # test$target <- test[["CAD_new"]]
+    # test$target <- test[["CKD_new"]]
+
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+
+
+    # mode <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # # res_new_onset[[w]] <- mode  
+
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # str(test)
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection  , data= test )
+    # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # mode.all <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # res_new_onset[[w]] <- mode  
+    # test.mode.blood <- cox.zph(mode.blood, global=FALSE);test.mode.blood
+    # test.mode.hx <- cox.zph(mode.hx, global=FALSE); test.mode.hx
+    # test.mode <- rbind(data.frame(test.mode.blood$table), data.frame(test.mode.hx$table))
+    test.mode <- cox.zph(mode.blood, global=FALSE);
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+
+
+    res_new_onset[[w]] <- test.mode[1,]
+    rm(test.mode)
+    print(w)
+
+}
+
+
+
+# res_new_onset_1 <- NULL
+for (w in c( "T2DM_new", "organ_specific_autoimmune_new", "dementia_new" , "Immunod_new")){    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+
+    test <- new_onset
+    test$target <- test[[w]]
+    
+    # test$target <- test[["Immunod_new"]]
+    # test$target <- test[["CKD_new"]]
+
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # str(test)
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination +  HbA1c , data= test )
+  
+    test.mode <- cox.zph(mode.blood, global=FALSE);
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+
+
+    res_new_onset[[w]] <- test.mode[1,]
+    rm(test.mode)
+    print(w)
+
+}
+
+res_new_onset
+
+# res_new_onset_1 <- NULL
+for (w in c( "systemic_autoimmune_new", "COPD_new", "Immunod_new", "HTN_new")){    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+
+    test <- new_onset
+    test$target <- test[[w]]
+    
+    # test$target <- test[["systemic_autoimmune_new"]]
+    # test$target <- test[["CKD_new"]]
+
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) & is.na(date_of_death) ~ ymd("2021/03/31"),
+        is.na(target) & !is.na(date_of_death) ~ ymd(date_of_death),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+    # str(test)
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination , data= test )
+    mode.blood
+    test.mode <- cox.zph(mode.blood, global=FALSE); test.mode
+
+
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+
+
+    res_new_onset[[w]] <- test.mode[1,]
+    rm(test.mode)
+    print(w)
+
+}
+
+res_new_onset
+
+
+
+# "CKD_new", 
+res_new_onset <- rbindlist(res_new_onset)
+# res_new_onset
+
+
+
+
+
+
+
+
+res_relapse <- NULL 
+
+for (w in c("CAD_relapse","AF_relapse","HTN_relapse","COPD_relapse","non_covid_pneumonia_relapse", "Stroke_relapse")){
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- relapse
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + systolic_BP + diastolic_BP , data= test )
+
+    test.mode <- cox.zph(mode.blood, global=FALSE);
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+    res_relapse[[w]] <- test.mode[1,]
+    print(w)
+    rm(df) 
+}
+
+
+for (w in c("CKD_relapse", "T2DM_relapse","organ_specific_autoimmune_relapse","VTE_relapse", "dementia_relapse", "Heart_Failure_relapse","Renal_Failure_relapse")){
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- relapse
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection  , data= test )
+
+    test.mode <- cox.zph(mode.blood, global=FALSE);
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+    res_relapse[[w]] <- test.mode[1,]
+    print(w)
+    rm(test.mode) 
+}
+# "systemic_autoimmune_relapse"
+for (w in c("systemic_autoimmune_relapse", "Immunod_relapse")){
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- relapse
+    test$target <- test[[w]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + age_char  , data= test )
+
+    test.mode <- cox.zph(mode.blood, global=FALSE);
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+    res_relapse[[w]] <- test.mode[1,]
+    print(w)
+    rm(test.mode) 
+}
+
+res_relapse <- rbindlist(res_relapse)
+
+
+
+
+res_hos_after_vaccine <- NULL 
+
+for (w in c("CAD_hos_after_vaccine", "COPD_hos_after_vaccine", "HTN_hos_after_vaccine", "non_covid_pneumonia_hos_after_vaccine", "Stroke_hos_after_vaccine",  "VTE_hos_after_vaccine", "AF_hos_after_vaccine",  "Heart_Failure_hos_after_vaccine")){
+    
+    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+
+
+    test$target <- test[[w]]
+    
+    # test$target <- test[["CAD_hos_after_vaccine"]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    #     mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #    mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #     df <-  summary(mode)$coefficients %>% as.data.frame() 
+    
+    #    cat(df[which(df[,5] < 0.1),] %>% rownames , sep = " + ")
+
+
+    # str(df)
+    # df$Sig <- ifelse(df[,5] < 0.001, "***", 
+    #             ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+    #                 ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    # # option(digits=3)
+    # df <- cbind(df, exp(confint(mode)));df
+    
+    
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb  , data= test )
+    # # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+
+    # mode.all <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # res_new_onset[[w]] <- mode  
+    # test.mode.blood <- cox.zph(mode.blood, global=FALSE);test.mode.blood
+    # test.mode.hx <- cox.zph(mode.hx, global=FALSE); test.mode.hx
+    # test.mode <- rbind(data.frame(test.mode.blood$table), data.frame(test.mode.hx$table))
+
+    # mode.univariable <- coxph(Surv(time, event==1) ~
+                # vaccination  , data= test )
+    
+    # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+   test.mode <- cox.zph(mode.blood, global=FALSE);
+    #    test.uni_mode <- cox.zph(mode.univariable, global=FALSE); test.uni_mode
+
+    test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+
+
+
+#    test.mode[1,]
+    # res_hos_after_vaccine[[w]] <- df 
+    res_hos_after_vaccine[[w]] <- test.mode[1,]
+    rm(test.mode) 
+    print(w)
+}
+
+# res_hos_after_vaccine[[1]]
+
+
+
+
+for (w in c("organ_specific_autoimmune_hos_after_vaccine", "T2DM_hos_after_vaccine",  "CKD_hos_after_vaccine", "dementia_hos_after_vaccine", "Renal_Failure_hos_after_vaccine")){
+    
+    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+
+
+    test$target <- test[[w]]
+    
+    # test$target <- test[["CAD_hos_after_vaccine"]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    #     mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #    mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #     df <-  summary(mode)$coefficients %>% as.data.frame() 
+    
+    #    cat(df[which(df[,5] < 0.1),] %>% rownames , sep = " + ")
+
+
+    # str(df)
+    # df$Sig <- ifelse(df[,5] < 0.001, "***", 
+    #             ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+    #                 ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    # # option(digits=3)
+    # df <- cbind(df, exp(confint(mode)));df
+    
+    
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection + age_char + sex + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + Glucose + HDL + LDL + HbA1c + Trig + Hb  , data= test )
+    # # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+
+    # mode.all <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # res_new_onset[[w]] <- mode  
+    # test.mode.blood <- cox.zph(mode.blood, global=FALSE);test.mode.blood
+    # test.mode.hx <- cox.zph(mode.hx, global=FALSE); test.mode.hx
+    # test.mode <- rbind(data.frame(test.mode.blood$table), data.frame(test.mode.hx$table))
+
+    # mode.univariable <- coxph(Surv(time, event==1) ~
+                # vaccination  , data= test )
+    
+    # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+   test.mode <- cox.zph(mode.blood, global=FALSE); test.mode
+#    test.uni_mode <- cox.zph(mode.univariable, global=FALSE); test.uni_mode
+
+#    test.mode[1,]
+    # res_hos_after_vaccine[[w]] <- df 
+        test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+
+    res_hos_after_vaccine[[w]] <- test.mode[1,]
+    rm(test.mode) 
+    print(w)
+}
+
+for (w in c("Immunod_hos_after_vaccine", "organ_specific_autoimmune_hos_after_vaccine",  "systemic_autoimmune_hos_after_vaccine")){
+    
+    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+
+
+    test$target <- test[[w]]
+    
+    # test$target <- test[["CAD_hos_after_vaccine"]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    #     mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #    mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #     df <-  summary(mode)$coefficients %>% as.data.frame() 
+    
+    #    cat(df[which(df[,5] < 0.1),] %>% rownames , sep = " + ")
+
+
+    # str(df)
+    # df$Sig <- ifelse(df[,5] < 0.001, "***", 
+    #             ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+    #                 ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    # # option(digits=3)
+    # df <- cbind(df, exp(confint(mode)));df
+    
+    
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + prior_infection , data= test )
+    # # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+
+    # mode.all <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # res_new_onset[[w]] <- mode  
+    # test.mode.blood <- cox.zph(mode.blood, global=FALSE);test.mode.blood
+    # test.mode.hx <- cox.zph(mode.hx, global=FALSE); test.mode.hx
+    # test.mode <- rbind(data.frame(test.mode.blood$table), data.frame(test.mode.hx$table))
+
+    # mode.univariable <- coxph(Surv(time, event==1) ~
+                # vaccination  , data= test )
+    
+    # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+   test.mode <- cox.zph(mode.blood, global=FALSE); test.mode
+#    test.uni_mode <- cox.zph(mode.univariable, global=FALSE); test.uni_mode
+
+#    test.mode[1,]
+    # res_hos_after_vaccine[[w]] <- df 
+        test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+    res_hos_after_vaccine[[w]] <- test.mode[1,]
+    rm(test.mode) 
+    print(w)
+}
+
+
+for (w in c("systemic_autoimmune_hos_after_vaccine")){
+    
+    
+    rm(test)
+    # test <- new_onset %>% mutate(target = i) 
+    test <- hos_after_vaccine
+
+
+    test$target <- test[[w]]
+    
+    # test$target <- test[["CAD_hos_after_vaccine"]]
+    test <- test %>%
+    mutate(target_index_date=case_when(
+        is.na(target) ~ ymd("2021/03/31"),
+        !is.na(target) ~ ymd(target)
+    )) %>%
+    mutate_at(c("target", "target_index_date"), ymd) %>% 
+    mutate(
+    event = ifelse(!is.na(target), 1, 0),
+    time = time_length(interval( index_date, target_index_date), 'day')
+    ) 
+
+    for (i in c("CAD_hx","COPD_hx","HTN_hx","Immunod_hx","non_covid_pneumonia_hx","organ_specific_autoimmune_hx","Stroke_hx","systemic_autoimmune_hx","T2DM_hx","VTE_hx","CKD_hx","AF_hx","dementia_hx","sex","ethnic_c","smoking_status","hx_cancer","Immunosuppressants", "event", "vaccination")) {
+        test[[i]] <- as.factor(test[[i]])
+    }
+
+    for (i in c("age_char","bmi","townsend", "systolic_BP", "diastolic_BP", "waist_circum", "no.hos", "no.non_cancer_illness","no.gp_med", "Glucose","HDL","LDL","HbA1c","Trig","Hb" )) {
+        test[[i]] <- as.numeric(test[[i]])
+    }
+
+    #     mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #    mode <- coxph(Surv(time, event==1) ~
+    #                 vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+    #     df <-  summary(mode)$coefficients %>% as.data.frame() 
+    
+    #    cat(df[which(df[,5] < 0.1),] %>% rownames , sep = " + ")
+
+
+    # str(df)
+    # df$Sig <- ifelse(df[,5] < 0.001, "***", 
+    #             ifelse(df[,5] < 0.01 & df[,5] >= 0.001, "**",
+    #                 ifelse(df[,5] < 0.05 & df[,5] >= 0.01, "*", "")))
+    # # option(digits=3)
+    # df <- cbind(df, exp(confint(mode)));df
+    
+    
+    mode.blood <- coxph(Surv(time, event==1) ~
+                vaccination + age_char , data= test )
+    # # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+
+
+    # mode.all <- coxph(Surv(time, event==1) ~
+    #             vaccination + prior_infection + age_char + sex + ethnic_c + no.non_cancer_illness + no.hos + no.gp_med + townsend + bmi + waist_circum + smoking_status + hx_cancer + Glucose + HDL + LDL + HbA1c + Trig + Hb + Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+    # res_new_onset[[w]] <- mode  
+    # test.mode.blood <- cox.zph(mode.blood, global=FALSE);test.mode.blood
+    # test.mode.hx <- cox.zph(mode.hx, global=FALSE); test.mode.hx
+    # test.mode <- rbind(data.frame(test.mode.blood$table), data.frame(test.mode.hx$table))
+
+    # mode.univariable <- coxph(Surv(time, event==1) ~
+                # vaccination  , data= test )
+    
+    # res_new_onset[[w]] <- mode  
+    # mode.hx <- coxph(Surv(time, event==1) ~
+    #             Immunosuppressants + CAD_hx + COPD_hx + HTN_hx + Immunod_hx + non_covid_pneumonia_hx + organ_specific_autoimmune_hx + Stroke_hx + systemic_autoimmune_hx + T2DM_hx + CKD_hx + AF_hx + dementia_hx , data= test )
+   test.mode <- cox.zph(mode.blood, global=FALSE); test.mode
+#    test.uni_mode <- cox.zph(mode.univariable, global=FALSE); test.uni_mode
+
+#    test.mode[1,]
+    # res_hos_after_vaccine[[w]] <- df 
+        test.mode <-  data.frame(test.mode$table)
+    test.mode$outcome <- w 
+    res_hos_after_vaccine[[w]] <- test.mode[1,]
+    rm(test.mode) 
+    print(w)
+}
+
+res_hos_after_vaccine
+
+
+res_hos_after_vaccine <- rbindlist(res_hos_after_vaccine)
+
+res <- rbindlist(list(res_new_onset, res_relapse, res_hos_after_vaccine))
+pchisq(1, df =  3)
+# fwrite(res_hos_after_vaccine, "/exeh_4/xyong/project/Vaccine-seq/res/Aug-3/mode-test/Model-test-Vaccine-day0-date-of-vaccine-without-infection-status-hos.csv.gz")
+# save(res_new_onset, res_relapse, res_hos_after_vaccine, file = "/exeh_4/xyong/project/Vaccine-seq/res/Aug-3/mode-test/Model-test-Vaccine-day0-date-of-vaccine-with-infection-status-18-Aug.RData")
+tmp <- res %>% mutate(
+    Day0 = "the date of first dose",
+    Prior_infection = "with-prior-infection",
+    PTDM = "N"
+)
+
+
+openxlsx::write.xlsx(tmp, file = "/exeh_4/xyong/project/Vaccine-seq/res/Model-test/Vaccine-effectivenss-Day0-the-date-of-vaccination-with-prior-infection-no-PTDM.xlsx")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
